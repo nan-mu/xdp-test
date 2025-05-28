@@ -19,9 +19,6 @@ struct {
     __uint(max_entries, 2);
 } prog_array SEC(".maps");
 
-// 声明你的 helper（假定 helper 编号已自动生成为 BPF_FUNC_xdp_call_tail_copy）
-static int (*bpf_xdp_call_tail_copy)(void *map, __u64 key) = (void *)BPF_FUNC_xdp_call_tail_copy;
-
 // parent XDP 程序：识别 ICMP ping，命中则调用 tail call
 SEC("xdp")
 int parent(struct xdp_md *ctx)
