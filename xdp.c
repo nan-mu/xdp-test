@@ -10,7 +10,7 @@
 #include <linux/ip.h>
 #include <linux/in.h>
 
-#define XDP_CTC 6  // 假定你的新返回值为 6
+#define XDP_CTC 5
 
 struct {
     __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
@@ -47,11 +47,12 @@ int parent(struct xdp_md *ctx)
         // 识别 ICMP 协议（ping）
         if (iph->protocol == IPPROTO_ICMP) {
             // 命中 ping，调用自定义 tail call helper
-            return bpf_xdp_call_tail_copy(&prog_array, key);
+            return bpf_redirect_map(&prog_array, key, 0);
         }
     }
     return XDP_PASS;
 }
+
 
 // child XDP 程序：调换 L2 头部地址并 XDP_TX
 SEC("xdp")
