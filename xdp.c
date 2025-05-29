@@ -42,7 +42,7 @@ int parent(struct xdp_md *ctx)
         if ((void*)iph + sizeof(*iph) > data_end)
             return XDP_PASS;
         // 识别 ICMP 协议（ping）
-        if (iph->protocol == IPPROTO_ICMP) {
+        if (iph->protocol == IPPROTO_UDP) {
             // 命中 ping，调用自定义 tail call helper
             return bpf_redirect_map(&prog_array, key, 0);
         }
@@ -58,27 +58,57 @@ int child(struct xdp_md *ctx)
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
     struct ethhdr *eth = data;
-    __u8 tmp[ETH_ALEN];
+    struct iphdr *iph;
+    struct udphdr *udph;
 
+    // 边界检查是必须的，以确保访问安全，满足 eBPF 验证器要求。
+    // 即使父程序已做检查，子程序仍需再次确认。
+
+    // 检查以太网头边界
     if (data + sizeof(*eth) > data_end)
         return XDP_ABORTED;
 
-    // 交换源 MAC 和目的 MAC
-    __builtin_memcpy(tmp, eth->h_source, ETH_ALEN);
-    __builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
-    __builtin_memcpy(eth->h_dest, tmp, ETH_ALEN);
-
-    // 交换ip地址
-    struct iphdr *iph = data + sizeof(*eth);
-    if ((void*)iph + sizeof(*iph) > data_end)
+    iph = data + sizeof(*eth);
+    // 检查 IP 头边界
+    if (data + sizeof(*eth) + sizeof(*iph) > data_end)
         return XDP_ABORTED;
-    __u32 tmp_ip = iph->saddr;
-    iph->saddr = iph->daddr;
-    iph->daddr = tmp_ip;
 
-    // 修改为ip包防止被过早丢弃
-    eth->h_proto = __constant_htons(ETH_P_IP);
+    udph = (void *)iph + sizeof(*iph);
+    // 检查 UDP 头边界
+    if ((void *)udph + sizeof(*udph) > data_end)
+        return XDP_ABORTED;
 
+    // --- 开始交换操作 ---
+
+    // 1. 交换源 IP 和目的 IP
+    __be32 original_src_ip = iph->saddr;
+    __be32 original_dst_ip = iph->daddr;
+    iph->saddr = original_dst_ip;
+    iph->daddr = original_src_ip;
+
+    // 2. 交换源 UDP 端口和目的 UDP 端口
+    __be16 original_src_port = udph->source;
+    __be16 original_dst_port = udph->dest;
+    udph->source = original_dst_port;
+    udph->dest = original_src_port;
+
+    // 3. 交换以太网帧的源 MAC 地址和目的 MAC 地址
+    unsigned char original_h_dest[ETH_ALEN];
+    unsigned char original_h_source[ETH_ALEN];
+    // 使用 __builtin_memcpy 复制 MAC 地址
+    __builtin_memcpy(original_h_dest, eth->h_dest, ETH_ALEN);
+    __builtin_memcpy(original_h_source, eth->h_source, ETH_ALEN);
+    __builtin_memcpy(eth->h_dest, original_h_source, ETH_ALEN);
+    __builtin_memcpy(eth->h_source, original_h_dest, ETH_ALEN);
+
+    // --- 更新校验和 ---
+    // 修改了 IP 和 UDP 头部，通常需要重新计算校验和。
+    // 简单起见，这里置零，让后续网络栈（或硬件卸载）处理。
+    // 在生产环境中，对于 IP 校验和，通常是 `iph->check = 0;`。
+    // 对于 UDP 校验和，如果非零，则必须重新计算，因为数据包内容（IP 地址）和端口都变了。
+    // 但在 IPv4 中 UDP 校验和为 0 是合法的（可选）。
+
+    // 返回 XDP_TX，表示将修改后的数据包发送回源设备
     return XDP_TX;
 }
 
