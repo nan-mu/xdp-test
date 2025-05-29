@@ -68,6 +68,14 @@ int child(struct xdp_md *ctx)
     __builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
     __builtin_memcpy(eth->h_dest, tmp, ETH_ALEN);
 
+    // 交换ip地址
+    struct iphdr *iph = data + sizeof(*eth);
+    if ((void*)iph + sizeof(*iph) > data_end)
+        return XDP_ABORTED;
+    __u32 tmp_ip = iph->saddr;
+    iph->saddr = iph->daddr;
+    iph->daddr = tmp_ip;
+
     // 修改为ip包防止被过早丢弃
     eth->h_proto = __constant_htons(ETH_P_IP);
 
