@@ -8,6 +8,7 @@
 #include <bpf/bpf_helpers.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
+#include <linux/udp.h>
 #include <linux/in.h>
 
 #define XDP_CTC 5
